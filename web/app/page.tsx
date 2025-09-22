@@ -83,7 +83,7 @@ const PingPongGame = () => {
     gameElements.current.currentPlayerPaddleHeight = PADDLE_HEIGHT;
     gameElements.current.currentAiPaddleHeight = PADDLE_HEIGHT;
     // ランダムな方向にボールを発射
-    let side = Math.random() > 0.5 ? 1 : -1;
+    const side = Math.random() > 0.5 ? 1 : -1;
     gameElements.current.ballSpeedX = INITIAL_BALL_SPEED * side;
     gameElements.current.ballSpeedY = Math.random() * 6 - 3;
   }, []);
@@ -102,7 +102,7 @@ const PingPongGame = () => {
   };
 
   // ゲームロジックの更新
-  const update = (canvas: HTMLCanvasElement) => {
+  const update = useCallback((canvas: HTMLCanvasElement) => {
     const { current: el } = gameElements;
 
     el.ballX += el.ballSpeedX;
@@ -111,7 +111,6 @@ const PingPongGame = () => {
     // AIパドルの移動ロジックをより賢く調整
     // ボールの進行方向を予測してパドルを動かす
     const aiCenter = el.aiY + el.currentAiPaddleHeight / 2;
-    const aiPredictionX = el.ballX + el.ballSpeedX * 10;
     const aiPredictionY = el.ballY + el.ballSpeedY * 10;
     const aiTargetY = aiPredictionY;
 
@@ -139,7 +138,7 @@ const PingPongGame = () => {
         el.ballSpeedY *= 1.1;
       }
       el.ballSpeedX = -el.ballSpeedX;
-      let deltaY = el.ballY - (el.playerY + el.currentPlayerPaddleHeight / 2);
+      const deltaY = el.ballY - (el.playerY + el.currentPlayerPaddleHeight / 2);
       el.ballSpeedY = deltaY * 0.2;
       el.ballColor = '#66ccff';
       setTimeout(() => el.ballColor = '#f7fafc', 100);
@@ -155,7 +154,7 @@ const PingPongGame = () => {
         el.ballSpeedY *= 1.1;
       }
       el.ballSpeedX = -el.ballSpeedX;
-      let deltaY = el.ballY - (el.aiY + el.currentAiPaddleHeight / 2);
+      const deltaY = el.ballY - (el.aiY + el.currentAiPaddleHeight / 2);
       el.ballSpeedY = deltaY * 0.2;
       el.ballColor = '#ff9999';
       setTimeout(() => el.ballColor = '#f7fafc', 100);
@@ -178,10 +177,10 @@ const PingPongGame = () => {
     if (scoreRef.current.player >= 5 || scoreRef.current.ai >= 5) {
       setGameState('gameOver');
     }
-  };
+  }, [resetGame]);
 
   // 描画処理
-  const draw = (context: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
+  const draw = useCallback((context: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
     const { current: el } = gameElements;
 
     // 背景
@@ -223,10 +222,10 @@ const PingPongGame = () => {
     context.fillStyle = '#e2e8f0';
     context.fillText(scoreRef.current.player.toString(), canvas.width / 2 - 60, 50);
     context.fillText(scoreRef.current.ai.toString(), canvas.width / 2 + 60, 50);
-  };
+  }, []);
 
   // ゲーム開始前/終了後の画面描画
-  const drawStartOrGameOver = (context: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
+  const drawStartOrGameOver = useCallback((context: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
     context.fillStyle = 'rgba(26, 32, 44, 0.9)';
     context.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -246,7 +245,7 @@ const PingPongGame = () => {
       context.font = '24px "Segoe UI", sans-serif';
       context.fillText('クリックまたはタップしてリスタート', canvas.width / 2, canvas.height / 2 + 60);
     }
-  };
+  }, [score.player]);
 
   // イベントハンドラをuseCallbackでメモ化
   const handleResize = useCallback(() => {
@@ -256,7 +255,7 @@ const PingPongGame = () => {
     if (canvas && context) {
       drawStartOrGameOver(context, canvas);
     }
-  }, [initializeCanvas]);
+  }, [initializeCanvas, drawStartOrGameOver]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (gameStateRef.current !== 'playing') return;
@@ -318,7 +317,7 @@ const PingPongGame = () => {
     } else {
       drawStartOrGameOver(context, canvas);
     }
-  }, [gameState, initializeCanvas, resetGame]);
+  }, [gameState, initializeCanvas, resetGame, update, draw, drawStartOrGameOver]);
 
   const handleCanvasClick = () => {
     if (gameState === 'start') {
