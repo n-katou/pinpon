@@ -16,6 +16,15 @@ const PingPongGame = () => {
 
   const [gameState, setGameState] = useState<'start' | 'playing' | 'gameOver'>('start');
 
+  // 最新のゲーム状態を保持するための参照
+  const gameStateRef = useRef(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
+
+  // 最新のcanvasとcontextを保持するための参照
+  const contextRef = useRef<CanvasRenderingContext2D | null>(null);
+
   // ゲームの定数
   const PADDLE_HEIGHT = 100;
   const PADDLE_WIDTH = 12;
@@ -34,7 +43,11 @@ const PingPongGame = () => {
     // ボールの色を変更するための状態
     ballColor: '#f7fafc',
     // 画面フラッシュのための状態
-    flashColor: 'rgba(0,0,0,0)'
+    flashColor: 'rgba(0,0,0,0)',
+    // 変化するボールとパドルのサイズ
+    currentBallRadius: BALL_RADIUS,
+    currentPlayerPaddleHeight: PADDLE_HEIGHT,
+    currentAiPaddleHeight: PADDLE_HEIGHT,
   });
 
   // Canvasの初期化とリサイズ処理
@@ -42,24 +55,23 @@ const PingPongGame = () => {
     const canvas = canvasRef.current;
     if (!canvas) {
       console.error("Canvas element not found.");
-      return { canvas: null, context: null };
+      return;
     }
     const context = canvas.getContext('2d');
     if (!context) {
       console.error("2D context not available.");
-      return { canvas, context: null };
+      return;
     }
     const { width, height } = canvas.getBoundingClientRect();
     canvas.width = width;
     canvas.height = height;
+    contextRef.current = context; // context refを設定
 
     // ゲーム要素の初期位置を設定
     gameElements.current.ballX = canvas.width / 2;
     gameElements.current.ballY = canvas.height / 2;
     gameElements.current.playerY = canvas.height / 2 - PADDLE_HEIGHT / 2;
     gameElements.current.aiY = canvas.height / 2 - PADDLE_HEIGHT / 2;
-
-    return { canvas, context };
   }, []);
 
   // ゲームをリセットする関数
@@ -67,72 +79,27 @@ const PingPongGame = () => {
     gameElements.current.ballX = canvas.width / 2;
     gameElements.current.ballY = canvas.height / 2;
     gameElements.current.ballColor = '#f7fafc';
+    gameElements.current.currentBallRadius = BALL_RADIUS;
+    gameElements.current.currentPlayerPaddleHeight = PADDLE_HEIGHT;
+    gameElements.current.currentAiPaddleHeight = PADDLE_HEIGHT;
     // ランダムな方向にボールを発射
     let side = Math.random() > 0.5 ? 1 : -1;
     gameElements.current.ballSpeedX = INITIAL_BALL_SPEED * side;
     gameElements.current.ballSpeedY = Math.random() * 6 - 3;
   }, []);
 
-  // ゲームのメインループ
-  useEffect(() => {
-    const { canvas, context } = initializeCanvas();
-    if (!canvas || !context) return;
-
-    let animationFrameId: number;
-    let lastTime = 0;
-    const gameLoop = (timestamp: number) => {
-      // フレームレートの調整
-      const delta = timestamp - lastTime;
-      lastTime = timestamp;
-
-      if (gameState !== 'playing') {
-        drawStartOrGameOver(context, canvas);
-        return;
-      }
-
-      update(canvas);
-      draw(context, canvas);
-
-      animationFrameId = requestAnimationFrame(gameLoop);
-    };
-
-    if (gameState === 'playing') {
-      resetGame(canvas);
-      animationFrameId = requestAnimationFrame(gameLoop);
-    } else {
-      drawStartOrGameOver(context, canvas);
+  // ランダムイベントのトリガー
+  const triggerRandomEvent = () => {
+    const { current: el } = gameElements;
+    const event = Math.random();
+    if (event < 0.3) { // ボールサイズの変更
+      el.currentBallRadius = BALL_RADIUS * (0.5 + Math.random());
+    } else if (event < 0.6) { // プレイヤーパドルの変更
+      el.currentPlayerPaddleHeight = PADDLE_HEIGHT * (0.5 + Math.random());
+    } else { // AIパドルの変更
+      el.currentAiPaddleHeight = PADDLE_HEIGHT * (0.5 + Math.random());
     }
-
-    const handleResize = () => {
-      initializeCanvas();
-      if (gameState !== 'playing') {
-        drawStartOrGameOver(context, canvas);
-      }
-    };
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener('resize', handleResize);
-    };
-  }, [gameState, initializeCanvas, resetGame]);
-
-  // プレイヤーのパドル操作
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      let newPlayerY = e.clientY - rect.top - PADDLE_HEIGHT / 2;
-      newPlayerY = Math.max(0, Math.min(newPlayerY, canvas.height - PADDLE_HEIGHT));
-      gameElements.current.playerY = newPlayerY;
-    };
-    window.addEventListener('mousemove', handleMouseMove);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-    };
-  }, []);
+  };
 
   // ゲームロジックの更新
   const update = (canvas: HTMLCanvasElement) => {
@@ -142,64 +109,67 @@ const PingPongGame = () => {
     el.ballY += el.ballSpeedY;
 
     // AIパドルの移動ロジックをより賢く調整
-    const aiCenter = el.aiY + PADDLE_HEIGHT / 2;
-    const aiSpeed = Math.abs(el.ballSpeedY) * 0.9; // ボール速度に応じてAIの速度も調整
-    if (aiCenter < el.ballY - 20) {
+    // ボールの進行方向を予測してパドルを動かす
+    const aiCenter = el.aiY + el.currentAiPaddleHeight / 2;
+    const aiPredictionX = el.ballX + el.ballSpeedX * 10;
+    const aiPredictionY = el.ballY + el.ballSpeedY * 10;
+    const aiTargetY = aiPredictionY;
+
+    const aiSpeed = Math.abs(el.ballSpeedY) * 1.0;
+    if (aiCenter < aiTargetY - 10) {
       el.aiY += aiSpeed;
-    } else if (aiCenter > el.ballY + 20) {
+    } else if (aiCenter > aiTargetY + 10) {
       el.aiY -= aiSpeed;
     }
-    el.aiY = Math.max(0, Math.min(el.aiY, canvas.height - PADDLE_HEIGHT));
+    el.aiY = Math.max(0, Math.min(el.aiY, canvas.height - el.currentAiPaddleHeight));
 
     // 衝突判定: 上下の壁
-    if (el.ballY - BALL_RADIUS < 0 || el.ballY + BALL_RADIUS > canvas.height) {
+    if (el.ballY - el.currentBallRadius < 0 || el.ballY + el.currentBallRadius > canvas.height) {
       el.ballSpeedY = -el.ballSpeedY;
     }
 
     // 衝突判定: パドル
     // プレイヤーパドル
-    if (el.ballX - BALL_RADIUS < PADDLE_WIDTH &&
+    if (el.ballX - el.currentBallRadius < PADDLE_WIDTH &&
       el.ballY > el.playerY &&
-      el.ballY < el.playerY + PADDLE_HEIGHT) {
-      // ボールの速度を上げる
+      el.ballY < el.playerY + el.currentPlayerPaddleHeight) {
       const currentSpeed = Math.sqrt(el.ballSpeedX * el.ballSpeedX + el.ballSpeedY * el.ballSpeedY);
       if (currentSpeed < MAX_BALL_SPEED) {
         el.ballSpeedX *= 1.1;
         el.ballSpeedY *= 1.1;
       }
       el.ballSpeedX = -el.ballSpeedX;
-      let deltaY = el.ballY - (el.playerY + PADDLE_HEIGHT / 2);
+      let deltaY = el.ballY - (el.playerY + el.currentPlayerPaddleHeight / 2);
       el.ballSpeedY = deltaY * 0.2;
-      el.ballColor = '#66ccff'; // ヒット時の色
+      el.ballColor = '#66ccff';
       setTimeout(() => el.ballColor = '#f7fafc', 100);
     }
 
     // AIパドル
-    if (el.ballX + BALL_RADIUS > canvas.width - PADDLE_WIDTH &&
+    if (el.ballX + el.currentBallRadius > canvas.width - PADDLE_WIDTH &&
       el.ballY > el.aiY &&
-      el.ballY < el.aiY + PADDLE_HEIGHT) {
-      // ボールの速度を上げる
+      el.ballY < el.aiY + el.currentAiPaddleHeight) {
       const currentSpeed = Math.sqrt(el.ballSpeedX * el.ballSpeedX + el.ballSpeedY * el.ballSpeedY);
       if (currentSpeed < MAX_BALL_SPEED) {
         el.ballSpeedX *= 1.1;
         el.ballSpeedY *= 1.1;
       }
       el.ballSpeedX = -el.ballSpeedX;
-      let deltaY = el.ballY - (el.aiY + PADDLE_HEIGHT / 2);
+      let deltaY = el.ballY - (el.aiY + el.currentAiPaddleHeight / 2);
       el.ballSpeedY = deltaY * 0.2;
-      el.ballColor = '#ff9999'; // ヒット時の色
+      el.ballColor = '#ff9999';
       setTimeout(() => el.ballColor = '#f7fafc', 100);
     }
 
     // 得点判定
     if (el.ballX < 0) {
       setScore(s => ({ ...s, ai: s.ai + 1 }));
-      el.flashColor = 'rgba(245, 101, 101, 0.5)'; // AI得点時に赤くフラッシュ
+      el.flashColor = 'rgba(245, 101, 101, 0.5)';
       setTimeout(() => el.flashColor = 'rgba(0,0,0,0)', 300);
       resetGame(canvas);
     } else if (el.ballX > canvas.width) {
       setScore(s => ({ ...s, player: s.player + 1 }));
-      el.flashColor = 'rgba(66, 153, 225, 0.5)'; // プレイヤー得点時に青くフラッシュ
+      el.flashColor = 'rgba(66, 153, 225, 0.5)';
       setTimeout(() => el.flashColor = 'rgba(0,0,0,0)', 300);
       resetGame(canvas);
     }
@@ -235,16 +205,16 @@ const PingPongGame = () => {
 
     // プレイヤーパドル
     context.fillStyle = '#4299e1';
-    context.fillRect(0, el.playerY, PADDLE_WIDTH, PADDLE_HEIGHT);
+    context.fillRect(0, el.playerY, PADDLE_WIDTH, el.currentPlayerPaddleHeight);
 
     // AIパドル
     context.fillStyle = '#f56565';
-    context.fillRect(canvas.width - PADDLE_WIDTH, el.aiY, PADDLE_WIDTH, PADDLE_HEIGHT);
+    context.fillRect(canvas.width - PADDLE_WIDTH, el.aiY, PADDLE_WIDTH, el.currentAiPaddleHeight);
 
     // ボール
     context.fillStyle = el.ballColor;
     context.beginPath();
-    context.arc(el.ballX, el.ballY, BALL_RADIUS, 0, Math.PI * 2);
+    context.arc(el.ballX, el.ballY, el.currentBallRadius, 0, Math.PI * 2);
     context.fill();
 
     // スコア表示
@@ -263,20 +233,92 @@ const PingPongGame = () => {
     context.fillStyle = '#f7fafc';
     context.textAlign = 'center';
 
-    if (gameState === 'start') {
+    if (gameStateRef.current === 'start') {
       context.font = '40px "Segoe UI", sans-serif';
       context.fillText('ピンポンゲーム', canvas.width / 2, canvas.height / 2 - 40);
       context.font = '24px "Segoe UI", sans-serif';
-      context.fillText('クリックして開始', canvas.width / 2, canvas.height / 2 + 20);
-    } else if (gameState === 'gameOver') {
+      context.fillText('クリックまたはタップして開始', canvas.width / 2, canvas.height / 2 + 20);
+    } else if (gameStateRef.current === 'gameOver') {
       context.font = '40px "Segoe UI", sans-serif';
       const winner = score.player >= 5 ? 'プレイヤーの勝利！' : 'AIの勝利！';
       context.fillText('ゲームオーバー', canvas.width / 2, canvas.height / 2 - 60);
       context.fillText(winner, canvas.width / 2, canvas.height / 2);
       context.font = '24px "Segoe UI", sans-serif';
-      context.fillText('クリックしてリスタート', canvas.width / 2, canvas.height / 2 + 60);
+      context.fillText('クリックまたはタップしてリスタート', canvas.width / 2, canvas.height / 2 + 60);
     }
   };
+
+  // イベントハンドラをuseCallbackでメモ化
+  const handleResize = useCallback(() => {
+    initializeCanvas();
+    const canvas = canvasRef.current;
+    const context = contextRef.current;
+    if (canvas && context) {
+      drawStartOrGameOver(context, canvas);
+    }
+  }, [initializeCanvas]);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (gameStateRef.current !== 'playing') return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    let newPlayerY = e.clientY - rect.top - gameElements.current.currentPlayerPaddleHeight / 2;
+    newPlayerY = Math.max(0, Math.min(newPlayerY, canvas.height - gameElements.current.currentPlayerPaddleHeight));
+    gameElements.current.playerY = newPlayerY;
+  }, []);
+
+  const handleTouchMove = useCallback((e: TouchEvent) => {
+    if (gameStateRef.current !== 'playing') return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const touchY = e.touches[0].clientY;
+    let newPlayerY = touchY - rect.top - gameElements.current.currentPlayerPaddleHeight / 2;
+    newPlayerY = Math.max(0, Math.min(newPlayerY, canvas.height - gameElements.current.currentPlayerPaddleHeight));
+    gameElements.current.playerY = newPlayerY;
+    e.preventDefault();
+  }, []);
+
+  // イベントリスナーはコンポーネントのマウント時に一度だけセットアップする
+  useEffect(() => {
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('touchmove', handleTouchMove);
+    };
+  }, [handleResize, handleMouseMove, handleTouchMove]);
+
+  // ゲームループのセットアップ
+  useEffect(() => {
+    initializeCanvas();
+    const canvas = canvasRef.current;
+    const context = contextRef.current;
+    if (!canvas || !context) return;
+
+    let animationFrameId: number;
+    const gameLoop = () => {
+      update(canvas);
+      draw(context, canvas);
+      animationFrameId = requestAnimationFrame(gameLoop);
+    };
+
+    if (gameState === 'playing') {
+      resetGame(canvas);
+      animationFrameId = requestAnimationFrame(gameLoop);
+      const eventInterval = setInterval(triggerRandomEvent, 10000); // 10秒ごとにイベントを発生
+      return () => {
+        cancelAnimationFrame(animationFrameId);
+        clearInterval(eventInterval);
+      };
+    } else {
+      drawStartOrGameOver(context, canvas);
+    }
+  }, [gameState, initializeCanvas, resetGame]);
 
   const handleCanvasClick = () => {
     if (gameState === 'start') {
@@ -298,7 +340,10 @@ const PingPongGame = () => {
           onClick={handleCanvasClick}
         />
       </div>
-      <p className="mt-4 text-gray-400">マウスを動かしてパドルを操作します。5点先取で勝利です。</p>
+      <p className="mt-4 text-gray-400">
+        マウスまたは指を動かしてパドルを操作します。
+        <br />5点先取で勝利です。
+      </p>
     </div>
   );
 };
